@@ -93,6 +93,9 @@ body{font-family:var(--fb);background:var(--light);color:var(--black);min-height
 .toggle-slider::before{content:'';position:absolute;width:22px;height:22px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.3s;box-shadow:0 2px 6px rgba(0,0,0,.2)}
 .toggle-switch input:checked+.toggle-slider{background:var(--success)}
 .toggle-switch input:checked+.toggle-slider::before{transform:translateX(24px)}
+.online-actions{display:flex;align-items:center;gap:9px}
+.dp-location-btn{border:1px solid rgba(255,255,255,.32);background:rgba(255,255,255,.1);color:#fff;border-radius:9px;padding:7px 9px;font:700 .68rem var(--fb);cursor:pointer;white-space:nowrap;transition:background .18s}
+.dp-location-btn:hover{background:rgba(255,255,255,.2)}
 .status-bar{display:flex;align-items:center;gap:7px;padding:10px 20px;background:rgba(0,0,0,.15);font-size:.73rem;font-weight:600;color:rgba(255,255,255,.7)}
 .status-pulse{width:7px;height:7px;border-radius:50%;background:#888;flex-shrink:0}
 .status-pulse.online{background:var(--success);animation:sp 1.5s ease-in-out infinite}
@@ -572,10 +575,13 @@ body{background:radial-gradient(circle at 90% 0,rgba(243,53,32,.09),transparent 
         <div class="ot-title" id="ot-title">You are Offline</div>
         <div class="ot-sub" id="ot-sub">Turn on to receive orders</div>
       </div>
-      <label class="toggle-switch">
-        <input type="checkbox" id="online-toggle" onchange="toggleOnline()">
-        <span class="toggle-slider"></span>
-      </label>
+      <div class="online-actions">
+        <button class="dp-location-btn" type="button" onclick="updatePartnerLocation()">Update location</button>
+        <label class="toggle-switch">
+          <input type="checkbox" id="online-toggle" onchange="toggleOnline()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
     </div>
     <div class="status-bar">
       <div class="status-pulse" id="status-pulse"></div>
@@ -992,9 +998,9 @@ function showLocationGate(message){
   showScreen('login');
 }
 function hideLocationGate(){const gate=document.getElementById('location-gate');if(gate)gate.classList.add('hidden');}
-function requireLocationAccess(errorElement){
+function requireLocationAccess(errorElement,stayOnCurrentScreen){
   return new Promise(resolve=>{
-    if(!navigator.geolocation){const msg='Location is not supported on this device or browser.';showLocationGate(msg);if(errorElement){errorElement.textContent=msg;errorElement.classList.add('show');}resolve(false);return;}
+    if(!navigator.geolocation){const msg='Location is not supported on this device or browser.';if(!stayOnCurrentScreen)showLocationGate(msg);if(errorElement){errorElement.textContent=msg;errorElement.classList.add('show');}resolve(false);return;}
     navigator.geolocation.getCurrentPosition(pos=>{
       _partnerLat=pos.coords.latitude;_partnerLng=pos.coords.longitude;hideLocationGate();
       if(errorElement)errorElement.classList.remove('show');
@@ -1002,9 +1008,18 @@ function requireLocationAccess(errorElement){
     },error=>{
       const denied=error&&error.code===1;
       const msg=denied?'Location permission is blocked. Turn on device Location, allow location permission for this app in Settings, then try again.':'Your current location could not be found. Turn on GPS/location and try again.';
-      showLocationGate(msg);if(errorElement){errorElement.textContent=msg;errorElement.classList.add('show');}resolve(false);
+      if(!stayOnCurrentScreen)showLocationGate(msg);if(errorElement){errorElement.textContent=msg;errorElement.classList.add('show');}resolve(false);
     },{enableHighAccuracy:true,timeout:12000,maximumAge:0});
   });
+}
+async function updatePartnerLocation(){
+  if(!_partner)return;
+  const ok=await requireLocationAccess(null,true);
+  if(!ok){toast('Could not update location. Allow location permission and try again.','err');return;}
+  try{
+    await db.collection('delivery_partners').doc(_partner.id).update({lat:_partnerLat,lng:_partnerLng,locationUpdatedAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+    toast('Location updated. Vendors can now find you nearby.','info');
+  }catch(error){toast('Location could not be saved: '+(error.message||'Please retry.'),'err');}
 }
 async function retryLocationAccess(){
   const ok=await requireLocationAccess();if(!ok)return;
@@ -1028,6 +1043,19 @@ async function handlePhotoUpload(e){
   finally{_photoProcessing=false;input.value='';}
 }
 
+async function completePendingPartnerRegistration(user){
+  try{
+    const saved=localStorage.getItem('jora_partner_pending_profile');
+    const draft=saved?JSON.parse(saved):null;
+    if(!draft||String(draft.email||'').toLowerCase()!==String(user.email||'').toLowerCase())return null;
+    const profile={...draft,uid:user.uid,joinedAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+    await user.updateProfile({displayName:(profile.firstName+' '+profile.lastName).trim()});
+    await db.collection('delivery_partners').doc(user.uid).set(profile);
+    localStorage.removeItem('jora_partner_pending_profile');
+    return profile;
+  }catch(error){console.warn('Pending partner registration:',error.message);return null;}
+}
+
 async function registerPartner(){
   if(_photoProcessing){toast('Please wait while your photo is processed.','err');return;}
   const fname=document.getElementById('reg-fname').value.trim();
@@ -1043,11 +1071,11 @@ async function registerPartner(){
   if(password.length<6){errEl.textContent='Password must contain at least 6 characters.';errEl.classList.add('show');return;}
   if(password!==confirmPassword){errEl.textContent='Passwords do not match.';errEl.classList.add('show');return;}
   errEl.classList.remove('show');
-  if(!await requireLocationAccess(errEl))return;
   let createdUser=null;
   const makeProfile=uid=>({uid:uid,firstName:fname,lastName:lname,email:email,phone:phone,vehicle:_selectedVehicle,photo:_photoDataURL,rating:5.0,completedOrders:0,totalEarnings:0,isOnline:false,accountStatus:'active',proofStatus:'pending',lat:null,lng:null,activeOrderId:null,joinedAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
   try{
     _creatingPartnerAccount=true;
+    localStorage.setItem('jora_partner_pending_profile',JSON.stringify(makeProfile('')));
     const cred=await auth.createUserWithEmailAndPassword(email,password);createdUser=cred.user;
     await cred.user.updateProfile({displayName:fname+' '+lname});
     const profile=makeProfile(cred.user.uid);
@@ -1056,6 +1084,9 @@ async function registerPartner(){
     toast('Account created successfully.');loadDashboard();showScreen('dashboard');showDashPanel('docs');
   }
   catch(e){
+    if(e&&e.code==='auth/email-confirmation-required'){
+      errEl.textContent='Account created. Confirm the email we sent, then sign in to complete your delivery-partner profile.';errEl.classList.add('show');return;
+    }
     if(e&&e.code==='auth/email-already-in-use'){
       try{
         const cred=await auth.signInWithEmailAndPassword(email,password);
@@ -1075,6 +1106,7 @@ async function registerPartner(){
         errEl.textContent=partnerAuthMessage(recoveryError);errEl.classList.add('show');return;
       }
     }
+    localStorage.removeItem('jora_partner_pending_profile');
     if(createdUser)await createdUser.delete().catch(()=>auth.signOut());
     errEl.textContent=partnerAuthMessage(e);errEl.classList.add('show');
   }
@@ -1087,10 +1119,13 @@ async function loginPartner(){
   const errEl=document.getElementById('login-err');
   if(!email||!password){errEl.textContent='Enter your email address and password.';errEl.classList.add('show');return;}
   errEl.classList.remove('show');
-  if(!await requireLocationAccess(errEl))return;
   try{
-    const cred=await auth.signInWithEmailAndPassword(email,password),doc=await db.collection('delivery_partners').doc(cred.user.uid).get();
-    if(!doc.exists){await auth.signOut();errEl.textContent='Your login exists, but delivery registration is incomplete. Open Create Account and submit the same email and password to finish registration.';errEl.classList.add('show');return;}
+    const cred=await auth.signInWithEmailAndPassword(email,password);let doc=await db.collection('delivery_partners').doc(cred.user.uid).get();
+    if(!doc.exists){
+      const profile=await completePendingPartnerRegistration(cred.user);
+      if(profile)doc={id:cred.user.uid,exists:true,data:()=>profile};
+    }
+    if(!doc.exists){await auth.signOut();errEl.textContent='Your login exists, but delivery registration is incomplete. Create the profile with the same email and password first.';errEl.classList.add('show');return;}
     if(doc.data().accountStatus==='disabled'){await auth.signOut();errEl.textContent='This delivery partner account has been disabled.';errEl.classList.add('show');return;}
     _partner={id:doc.id,...doc.data()};bindPartnerStorage(cred.user.uid,true);save('ls_dp_profile',JSON.stringify(_partner));
     toast('Welcome back, '+_partner.firstName+'!');loadDashboard();showScreen('dashboard');if(!hasRequiredProofs())showDashPanel('docs');
@@ -1107,7 +1142,30 @@ async function logout(){
   showScreen('login');
 }
 
-async function restorePartnerSession(user){try{if(!user){_partner=null;bindPartnerStorage('',false);localStorage.removeItem('ls_dp_profile');showScreen('login');return;}if(user.isAnonymous){await auth.signOut();_partner=null;bindPartnerStorage('',false);localStorage.removeItem('ls_dp_profile');showScreen('login');return;}if(!await requireLocationAccess())return;const doc=await db.collection('delivery_partners').doc(user.uid).get();if(!doc.exists||doc.data().accountStatus==='disabled'){await auth.signOut();_partner=null;bindPartnerStorage('',false);localStorage.removeItem('ls_dp_profile');showScreen('login');return;}_partner={id:doc.id,...doc.data()};bindPartnerStorage(user.uid,true);save('ls_dp_profile',JSON.stringify(_partner));loadDashboard();showScreen('dashboard');if(!hasRequiredProofs())showDashPanel('docs');if(_partner.isOnline&&hasRequiredProofs()){const tog=document.getElementById('online-toggle');if(tog)tog.checked=true;}}catch(e){console.warn('Partner session:',e.message);_partner=null;bindPartnerStorage('',false);localStorage.removeItem('ls_dp_profile');showScreen('login');}}
+async function restorePartnerSession(user){
+  try{
+    if(!user||user.isAnonymous){
+      if(user&&user.isAnonymous)await auth.signOut();
+      _partner=null;bindPartnerStorage('',false);localStorage.removeItem('ls_dp_profile');showScreen('login');return;
+    }
+    let doc=await db.collection('delivery_partners').doc(user.uid).get();
+    if(!doc.exists){
+      const profile=await completePendingPartnerRegistration(user);
+      if(profile)doc={id:user.uid,exists:true,data:()=>profile};
+    }
+    if(!doc.exists||doc.data().accountStatus==='disabled'){
+      await auth.signOut();_partner=null;bindPartnerStorage('',false);localStorage.removeItem('ls_dp_profile');showScreen('login');return;
+    }
+    _partner={id:doc.id,...doc.data()};bindPartnerStorage(user.uid,true);save('ls_dp_profile',JSON.stringify(_partner));
+    loadDashboard();showScreen('dashboard');
+    if(!hasRequiredProofs())showDashPanel('docs');
+    if(_partner.isOnline&&hasRequiredProofs()){const tog=document.getElementById('online-toggle');if(tog)tog.checked=true;}
+  }catch(e){
+    console.warn('Partner session:',e.message);
+    // Keep the Supabase session intact; a temporary network failure must not sign the partner out.
+    showScreen('login');
+  }
+}
 auth.onAuthStateChanged(user=>{if(!_creatingPartnerAccount)restorePartnerSession(user);});
 
 function loadDashboard(){
