@@ -7,9 +7,9 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800;900&family=Outfit:wght@400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./supabase-config.js"></script>
+<script src="./supabase-adapter.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -792,16 +792,7 @@ body{background:radial-gradient(circle at 90% 0,rgba(243,53,32,.09),transparent 
 <div class="toast-pop" id="toast"></div>
 
 <script>
-firebase.initializeApp({
-  apiKey:"AIzaSyCxNdOs69QAD-1FTIDVyf0N0N2YGqWNgOo",
-  authDomain:"nexcart-db-7a02f.firebaseapp.com",
-  projectId:"nexcart-db-7a02f",
-  storageBucket:"nexcart-db-7a02f.firebasestorage.app",
-  messagingSenderId:"868851396316",
-  appId:"1:868851396316:web:951e1988f3f2e4b065ce19",
-  measurementId:"G-NPMLZ054G8"
-});
-const db = firebase.firestore(),auth=firebase.auth();
+const { db, auth, supabaseCompat } = window.JoraSupabase;
 async function ensurePartnerAuth(){if(auth.currentUser)return auth.currentUser;throw new Error('Please sign in with your delivery partner email and password.');}
 function partnerAuthMessage(e){const code=e&&e.code||'';if(code==='auth/email-already-in-use')return'An account already exists for this email. Sign in instead.';if(code==='auth/invalid-email')return'Enter a valid email address.';if(code==='auth/weak-password')return'Use a password with at least 6 characters.';if(code==='auth/user-not-found'||code==='auth/wrong-password'||code==='auth/invalid-credential')return'Incorrect email or password.';if(code==='auth/too-many-requests')return'Too many attempts. Wait a moment and try again.';if(code==='auth/network-request-failed')return'Network unavailable. Check your internet connection.';return(e&&e.message||'Authentication failed').replace('Firebase: ','');}
 
@@ -2019,10 +2010,7 @@ function start(){const next=_partner&&_partner.id||'';if(uid===next)return;if(un
 const base=updatePartnerPanels;updatePartnerPanels=function(){base();start();render();};auth.onAuthStateChanged(()=>{uid='__reset__';start();});
 })();
 </script>
-<!-- Additive slot booking and real-time offer alert: login, signup, documents, earnings, wallet, and order flows above remain unchanged. -->
-<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
-<script>window.ZORRA_FCM_VAPID_KEY='YOUR_PUBLIC_VAPID_KEY';</script>
-<script src="./zorra-slot-alert-additive/public/assets/js/zorra-slot-alert.js"></script>
+<!-- Push notifications remain disabled until a Supabase-compatible provider is configured. -->
 <!-- Additive dashboard map option. It is only visible after authentication because it is inside screen-dashboard. -->
 <style id="zorra-dashboard-map-css">#partner-live-map{height:360px;border-radius:12px;overflow:hidden;background:#e5e7eb}.partner-map-note{margin:0 0 12px;color:#6b7280;font-size:.78rem;line-height:1.45}@media(max-width:560px){#partner-live-map{height:300px}}</style>
 <script id="zorra-dashboard-map-js">
