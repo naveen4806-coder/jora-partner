@@ -834,6 +834,7 @@ function bindPartnerStorage(uid,migrateLegacy=false){
 let _partner=loadJ('ls_dp_profile');
 let _isOnline=false;
 let _partnerLat=null,_partnerLng=null;
+let _gpsTrackingAllowed=false;
 let _lastLocationPush=0;
 let _lastPartnerLocationPush=0;
 let _activeOrder=null;
@@ -992,34 +993,30 @@ function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classL
 function showLogin(){document.getElementById('register-card').classList.add('hidden');document.getElementById('login-card').classList.remove('hidden');}
 function showRegister(){document.getElementById('login-card').classList.add('hidden');document.getElementById('register-card').classList.remove('hidden');}
 function showLocationGate(message){
+  if(_partner){showScreen('dashboard');setTimeout(()=>{if(window.showDashPanel)showDashPanel('map');toast(message||'Set your delivery location from the map.','info');},0);return;}
   const gate=document.getElementById('location-gate'),text=document.getElementById('location-gate-text');
-  if(text)text.textContent=message||'Turn on your device location and allow location permission for this app to continue.';
+  if(text)text.textContent=message||'Set your location after signing in.';
   if(gate)gate.classList.remove('hidden');
-  showScreen('login');
 }
 function hideLocationGate(){const gate=document.getElementById('location-gate');if(gate)gate.classList.add('hidden');}
 function requireLocationAccess(errorElement,stayOnCurrentScreen){
   return new Promise(resolve=>{
-    if(!navigator.geolocation){const msg='Location is not supported on this device or browser.';if(!stayOnCurrentScreen)showLocationGate(msg);if(errorElement){errorElement.textContent=msg;errorElement.classList.add('show');}resolve(false);return;}
+    if(!navigator.geolocation){const msg='Location is not supported on this device or browser.';if(errorElement){errorElement.textContent=msg;errorElement.classList.add('show');}resolve(false);return;}
     navigator.geolocation.getCurrentPosition(pos=>{
-      _partnerLat=pos.coords.latitude;_partnerLng=pos.coords.longitude;hideLocationGate();
+      _partnerLat=pos.coords.latitude;_partnerLng=pos.coords.longitude;_gpsTrackingAllowed=true;hideLocationGate();
       if(errorElement)errorElement.classList.remove('show');
       resolve(true);
     },error=>{
       const denied=error&&error.code===1;
       const msg=denied?'Location permission is blocked. Turn on device Location, allow location permission for this app in Settings, then try again.':'Your current location could not be found. Turn on GPS/location and try again.';
-      if(!stayOnCurrentScreen)showLocationGate(msg);if(errorElement){errorElement.textContent=msg;errorElement.classList.add('show');}resolve(false);
+      if(errorElement){errorElement.textContent=msg;errorElement.classList.add('show');}resolve(false);
     },{enableHighAccuracy:true,timeout:12000,maximumAge:0});
   });
 }
 async function updatePartnerLocation(){
   if(!_partner)return;
-  const ok=await requireLocationAccess(null,true);
-  if(!ok){toast('Could not update location. Allow location permission and try again.','err');return;}
-  try{
-    await db.collection('delivery_partners').doc(_partner.id).update({lat:_partnerLat,lng:_partnerLng,locationUpdatedAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
-    toast('Location updated. Vendors can now find you nearby.','info');
-  }catch(error){toast('Location could not be saved: '+(error.message||'Please retry.'),'err');}
+  showDashPanel('map');
+  toast('Choose GPS, search for an address, or tap the map to set your delivery location.','info');
 }
 async function retryLocationAccess(){
   const ok=await requireLocationAccess();if(!ok)return;
@@ -1170,6 +1167,7 @@ auth.onAuthStateChanged(user=>{if(!_creatingPartnerAccount)restorePartnerSession
 
 function loadDashboard(){
   if(!_partner)return;
+  if(!hasPartnerLocation()&&_partner.lat!=null&&_partner.lng!=null){_partnerLat=Number(_partner.lat);_partnerLng=Number(_partner.lng);}
   if(_partner.proofs&&!hasRequiredProofs())save('ls_dp_docs',_partner.proofs);
   document.getElementById('dp-name').textContent=_partner.firstName+' '+_partner.lastName;
   document.getElementById('dp-vehicle').innerHTML=vehicleEmoji(_partner.vehicle)+' '+capitalise(_partner.vehicle)+'&nbsp;&middot;&nbsp; ⭐ '+(_partner.rating||5.0).toFixed(1);
@@ -1178,8 +1176,7 @@ function loadDashboard(){
   else{av.textContent=(_partner.firstName||'?')[0].toUpperCase();}
   updateStats();
   listenAssignedOrders();
-  startLocationTracking();
-  if(_partner.isOnline&&hasRequiredProofs()){document.getElementById('online-toggle').checked=true;setOnlineUI(true);startLocationTracking();listenAvailableOrders();}
+  if(_partner.isOnline&&hasRequiredProofs()){document.getElementById('online-toggle').checked=true;setOnlineUI(true);listenAvailableOrders();}
   else if(_partner.isOnline&&!hasRequiredProofs()){document.getElementById('online-toggle').checked=false;setOnlineUI(false);setOnlineStatus(false);}
   if(_partnerWatcher)_partnerWatcher();
   _partnerWatcher=db.collection('delivery_partners').doc(_partner.id).onSnapshot(snap=>{if(!snap.exists)return;_partner={id:snap.id,...snap.data()};save('ls_dp_profile',JSON.stringify(_partner));updatePartnerPanels();});
@@ -1204,6 +1201,7 @@ function updateStats(){
   updatePartnerPanels();
 }
 
+function hasPartnerLocation(){return _partnerLat!==null&&_partnerLng!==null&&_partnerLat!==''&&_partnerLng!==''&&Number.isFinite(Number(_partnerLat))&&Number.isFinite(Number(_partnerLng));}
 function toggleOnline(){
   const on=document.getElementById('online-toggle').checked;
   if(!on&&_partner){
@@ -1217,6 +1215,13 @@ function toggleOnline(){
     setOnlineUI(false);
     showDashPanel('docs');
     toast('Upload all proofs first to go online.','err');
+    return;
+  }
+  if(on&&!hasPartnerLocation()){
+    document.getElementById('online-toggle').checked=false;
+    setOnlineUI(false);
+    showDashPanel('map');
+    toast('Set your delivery location on the map before going online.','err');
     return;
   }
   setOnlineUI(on);setOnlineStatus(on);
@@ -1238,7 +1243,7 @@ function setOnlineStatus(on){
 }
 
 function startLocationTracking(){
-  if(!navigator.geolocation){showLocationGate('Location is not supported on this device or browser.');return;}
+  if(!_gpsTrackingAllowed||!navigator.geolocation)return;
   if(_locWatcher!=null)return;
   _locWatcher=navigator.geolocation.watchPosition(pos=>{
     _partnerLat=pos.coords.latitude;_partnerLng=pos.coords.longitude;
@@ -1252,10 +1257,9 @@ function startLocationTracking(){
     }
     if(_delMap&&_riderMarker)_riderMarker.setLatLng([_partnerLat,_partnerLng]);
   },()=>{
-    _partnerLat=null;_partnerLng=null;
-    const toggle=document.getElementById('online-toggle');if(toggle)toggle.checked=false;
-    setOnlineUI(false);setOnlineStatus(false);stopOrdersListener();renderOrdersQueue([]);
-    showLocationGate('Location was turned off or permission was removed. Enable it in Settings to continue.');
+    _gpsTrackingAllowed=false;
+    stopLocationTracking();
+    toast('GPS updates stopped. Your saved map location remains available for nearby vendor assignments.','info');
   },{enableHighAccuracy:true,timeout:10000,maximumAge:5000});
 }
 function stopLocationTracking(){if(_locWatcher!=null){navigator.geolocation.clearWatch(_locWatcher);_locWatcher=null;}}
