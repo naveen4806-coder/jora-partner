@@ -7,9 +7,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800;900&family=Outfit:wght@400;500;600;700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="./supabase-config.js"></script>
-<script src="./supabase-adapter.js"></script>
+ <script src="./mongo-config.js"></script>
+ <script src="./mongo-adapter.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -798,7 +797,7 @@ body{background:radial-gradient(circle at 90% 0,rgba(243,53,32,.09),transparent 
 <div class="toast-pop" id="toast"></div>
 
 <script>
-const { db, auth, supabaseCompat } = window.JoraSupabase;
+const { db, auth, mongoCompat } = window.JoraMongo;
 async function ensurePartnerAuth(){if(auth.currentUser)return auth.currentUser;throw new Error('Please sign in with your delivery partner email and password.');}
 function partnerAuthMessage(e){const code=e&&e.code||'';if(code==='auth/email-already-in-use')return'An account already exists for this email. Sign in instead.';if(code==='auth/invalid-email')return'Enter a valid email address.';if(code==='auth/weak-password')return'Use a password with at least 6 characters.';if(code==='auth/user-not-found'||code==='auth/wrong-password'||code==='auth/invalid-credential')return'Incorrect email or password.';if(code==='auth/too-many-requests')return'Too many attempts. Wait a moment and try again.';if(code==='auth/network-request-failed')return'Network unavailable. Check your internet connection.';return(e&&e.message||'Authentication failed').replace('Firebase: ','');}
 
@@ -1159,7 +1158,7 @@ async function restorePartnerSession(user){
     if(_partner.isOnline&&hasRequiredProofs()){const tog=document.getElementById('online-toggle');if(tog)tog.checked=true;}
   }catch(e){
     console.warn('Partner session:',e.message);
-    // Keep the Supabase session intact; a temporary network failure must not sign the partner out.
+    // Keep the Mongo API session intact; a temporary network failure must not sign the partner out.
     showScreen('login');
   }
 }
@@ -2072,7 +2071,7 @@ function start(){const next=_partner&&_partner.id||'';if(uid===next)return;if(un
 const base=updatePartnerPanels;updatePartnerPanels=function(){base();start();render();};auth.onAuthStateChanged(()=>{uid='__reset__';start();});
 })();
 </script>
-<!-- Push notifications remain disabled until a Supabase-compatible provider is configured. -->
+<!-- Push notifications remain disabled until a server notification provider is configured. -->
 <!-- Additive dashboard map option. It is only visible after authentication because it is inside screen-dashboard. -->
 <style id="zorra-dashboard-map-css">#partner-live-map{height:360px;border-radius:12px;overflow:hidden;background:#e5e7eb}.partner-map-note{margin:0 0 12px;color:#6b7280;font-size:.78rem;line-height:1.45}@media(max-width:560px){#partner-live-map{height:300px}}</style>
 <script id="zorra-dashboard-map-js">
